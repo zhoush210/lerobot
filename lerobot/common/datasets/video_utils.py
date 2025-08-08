@@ -106,6 +106,7 @@ def decode_video_frames_torchvision(
 
     # set a video stream reader
     # TODO(rcadene): also load audio stream at the same time
+    warnings.filterwarnings("ignore", message="The video decoding and encoding capabilities of torchvision.*")
     reader = torchvision.io.VideoReader(video_path, "video")
 
     # set the first and last requested timestamps

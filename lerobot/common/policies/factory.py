@@ -32,7 +32,7 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import FeatureType
 
 
-def get_policy_class(name: str) -> PreTrainedPolicy:
+def get_policy_class(name: str, use_lora: bool) -> PreTrainedPolicy:
     """Get the policy's class and config class given a name (matching the policy class' `name` attribute)."""
     if name == "tdmpc":
         from lerobot.common.policies.tdmpc.modeling_tdmpc import TDMPCPolicy
@@ -114,7 +114,7 @@ def make_policy(
             "Please use `cpu` or `cuda` backend."
         )
 
-    policy_cls = get_policy_class(cfg.type)
+    policy_cls = get_policy_class(cfg.type, cfg.use_lora)
 
     kwargs = {}
     if ds_meta is not None:

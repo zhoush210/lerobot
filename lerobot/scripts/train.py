@@ -136,13 +136,28 @@ def train(cfg: TrainPipelineConfig):
         eval_env = make_env(cfg.env, n_envs=cfg.eval.batch_size)
 
     logging.info("Creating policy")
+    cfg.policy.use_lora = cfg.use_lora
     policy = make_policy(
         cfg=cfg.policy,
         ds_meta=dataset.meta,
     )
 
     logging.info("Creating optimizer and scheduler")
-    optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
+    if cfg.policy.use_lora:
+        # Freeze non-LoRA parameters
+        for name, param in policy.named_parameters():
+            if "lora_" not in name:
+                param.requires_grad = False
+
+        # Collect LoRA parameters only
+        lora_params = [p for n, p in policy.named_parameters() if "lora_" in n and p.requires_grad]
+
+        # Set optimizer and scheduler manually
+        optimizer = torch.optim.Adam(lora_params, lr=cfg.optimizer.lr or 1e-4)
+        lr_scheduler = None
+    else:
+        optimizer, lr_scheduler = make_optimizer_and_scheduler(cfg, policy)
+
     grad_scaler = GradScaler(device.type, enabled=cfg.policy.use_amp)
 
     step = 0  # number of policy updates (forward + backward + optim)

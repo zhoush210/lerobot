@@ -218,6 +218,30 @@ def aloha_gripper_from_angular_inv(value):
     return normalize(value, min_val=0.4, max_val=1.5)
 
 
+class LoRALinear(nn.Module):
+    def __init__(self, in_features, out_features, r=8, lora_alpha=32, lora_dropout=0.0, bias=True):
+        super().__init__()
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+        self.r = r
+        if r > 0:
+            self.lora_A = nn.Parameter(torch.zeros(r, in_features))
+            self.lora_B = nn.Parameter(torch.zeros(out_features, r))
+            nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+            nn.init.zeros_(self.lora_B)
+            self.scaling = lora_alpha / r
+            self.lora_dropout = nn.Dropout(lora_dropout)
+        else:
+            self.lora_A = None
+            self.lora_B = None
+
+    def forward(self, x):
+        result = self.linear(x)
+        if self.r > 0:
+            lora_out = F.linear(F.linear(self.lora_dropout(x), self.lora_A), self.lora_B) * self.scaling
+            result = result + lora_out
+        return result
+
+
 class PI0Policy(PreTrainedPolicy):
     """Wrapper class around PI0FlowMatching model to train and run inference within LeRobot."""
 
@@ -474,13 +498,53 @@ class PI0FlowMatching(nn.Module):
         )
         self.paligemma_with_expert = PaliGemmaWithExpertModel(paligemma_with_export_config)
 
-        # Projections are float32
-        self.state_proj = nn.Linear(self.config.max_state_dim, self.config.proj_width)
-        self.action_in_proj = nn.Linear(self.config.max_action_dim, self.config.proj_width)
-        self.action_out_proj = nn.Linear(self.config.proj_width, self.config.max_action_dim)
-
-        self.action_time_mlp_in = nn.Linear(self.config.proj_width * 2, self.config.proj_width)
-        self.action_time_mlp_out = nn.Linear(self.config.proj_width, self.config.proj_width)
+        if config.use_lora:
+            # LoRALinear替换nn.Linear
+            lora_r = 8
+            lora_alpha = 32
+            lora_dropout = 0.1
+            self.state_proj = LoRALinear(
+                self.config.max_state_dim,
+                self.config.proj_width,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+            )
+            self.action_in_proj = LoRALinear(
+                self.config.max_action_dim,
+                self.config.proj_width,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+            )
+            self.action_out_proj = LoRALinear(
+                self.config.proj_width,
+                self.config.max_action_dim,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+            )
+            self.action_time_mlp_in = LoRALinear(
+                self.config.proj_width * 2,
+                self.config.proj_width,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+            )
+            self.action_time_mlp_out = LoRALinear(
+                self.config.proj_width,
+                self.config.proj_width,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+            )
+        else:
+            # Projections are float32
+            self.state_proj = nn.Linear(self.config.max_state_dim, self.config.proj_width)
+            self.action_in_proj = nn.Linear(self.config.max_action_dim, self.config.proj_width)
+            self.action_out_proj = nn.Linear(self.config.proj_width, self.config.max_action_dim)
+            self.action_time_mlp_in = nn.Linear(self.config.proj_width * 2, self.config.proj_width)
+            self.action_time_mlp_out = nn.Linear(self.config.proj_width, self.config.proj_width)
 
         self.set_requires_grad()
 
