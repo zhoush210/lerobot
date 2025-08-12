@@ -474,7 +474,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         self.episodes = episodes
         self.tolerance_s = tolerance_s
         self.revision = revision if revision else CODEBASE_VERSION
-        self.video_backend = video_backend if video_backend else get_safe_default_codec()
+        # self.video_backend = video_backend if video_backend else get_safe_default_codec()
+        self.video_backend = "pyav"
         self.delta_indices = None
 
         # Unused attributes
