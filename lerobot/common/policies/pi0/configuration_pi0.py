@@ -26,6 +26,7 @@ from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
 @dataclass
 class PI0Config(PreTrainedConfig):
     # Input / output structure.
+    type: str = "pi0"
     n_obs_steps: int = 1
     chunk_size: int = 50
     n_action_steps: int = 50
