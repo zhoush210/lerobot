@@ -52,6 +52,75 @@ from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.scripts.eval import eval_policy
 
+# 右手14个自由度对应的原始28维数组索引
+RIGHT_HAND_ACTION_INDICES = [7, 8, 9, 10, 11, 12, 13, 14, 22, 23, 24, 25, 26, 27]
+
+
+def filter_right_hand_actions(batch: dict[str, Any]) -> dict[str, Any]:
+    """
+    过滤批次数据，只保留右手的14个自由度动作
+
+    Args:
+        batch: 包含动作数据的批次字典
+
+    Returns:
+        过滤后的批次字典，动作维度从28维变为14维
+    """
+    if "action" in batch and isinstance(batch["action"], torch.Tensor):
+        # 提取右手的14个自由度
+        batch["action"] = batch["action"][..., RIGHT_HAND_ACTION_INDICES]
+        logging.debug(
+            f"Filtered action from {batch['action'].shape[-1] + 14} to {batch['action'].shape[-1]} dimensions"
+        )
+
+    return batch
+
+
+def filter_dataset_stats_for_right_hand(
+    dataset_stats: dict[str, dict[str, torch.Tensor]],
+) -> dict[str, dict[str, torch.Tensor]]:
+    """
+    过滤数据集统计信息，只保留右手的14个自由度
+
+    Args:
+        dataset_stats: 原始数据集统计信息
+
+    Returns:
+        过滤后的统计信息
+    """
+    import numpy as np
+
+    filtered_stats = {}
+    for key, value in dataset_stats.items():
+        if key == "action" and isinstance(value, dict):
+            filtered_action_stats = {}
+            for stat_type, stat_value in value.items():
+                if isinstance(stat_value, torch.Tensor) and stat_value.shape[-1] == 28:
+                    # 提取右手的14个自由度统计信息
+                    filtered_action_stats[stat_type] = stat_value[..., RIGHT_HAND_ACTION_INDICES]
+                    logging.info(
+                        f"Filtered {stat_type} stats from {stat_value.shape} to {filtered_action_stats[stat_type].shape}"
+                    )
+                elif isinstance(stat_value, np.ndarray) and len(stat_value) == 28:
+                    # 提取右手的14个自由度统计信息
+                    filtered_action_stats[stat_type] = stat_value[RIGHT_HAND_ACTION_INDICES]
+                    logging.info(
+                        f"Filtered {stat_type} stats from {stat_value.shape} to {filtered_action_stats[stat_type].shape}"
+                    )
+                elif isinstance(stat_value, list) and len(stat_value) == 28:
+                    # 提取右手的14个自由度统计信息
+                    filtered_action_stats[stat_type] = [stat_value[i] for i in RIGHT_HAND_ACTION_INDICES]
+                    logging.info(
+                        f"Filtered {stat_type} stats from length {len(stat_value)} to {len(filtered_action_stats[stat_type])}"
+                    )
+                else:
+                    filtered_action_stats[stat_type] = stat_value
+            filtered_stats[key] = filtered_action_stats
+        else:
+            filtered_stats[key] = value
+
+    return filtered_stats
+
 
 def update_policy(
     train_metrics: MetricsTracker,
@@ -137,9 +206,44 @@ def train(cfg: TrainPipelineConfig):
 
     logging.info("Creating policy")
     cfg.policy.use_lora = cfg.use_lora
+
+    # 修改数据集元数据以支持14维动作输出
+    if hasattr(dataset.meta, "features") and "action" in dataset.meta.features:
+        # 创建一个新的元数据对象，手动设置所需的属性
+        from copy import deepcopy
+
+        modified_meta = type(dataset.meta)(
+            repo_id=dataset.meta.repo_id, root=dataset.meta.root, revision=dataset.meta.revision
+        )
+
+        # 复制所有属性
+        modified_meta.info = deepcopy(dataset.meta.info)
+        modified_meta.tasks = deepcopy(dataset.meta.tasks)
+        modified_meta.task_to_task_index = deepcopy(dataset.meta.task_to_task_index)
+        modified_meta.episodes = deepcopy(dataset.meta.episodes)
+        modified_meta.episodes_stats = deepcopy(dataset.meta.episodes_stats)
+
+        # 修改info中的features
+        modified_meta.info["features"] = deepcopy(dataset.meta.info["features"])
+        modified_meta.info["features"]["action"] = dict(modified_meta.info["features"]["action"])
+        modified_meta.info["features"]["action"]["shape"] = (14,)
+        logging.info(f"Updated action feature shape to {modified_meta.info['features']['action']['shape']}")
+
+        # 过滤数据集统计信息以匹配14维动作
+        if hasattr(dataset, "stats") and dataset.stats:
+            modified_meta.stats = filter_dataset_stats_for_right_hand(dataset.stats)
+            logging.info("Filtered dataset statistics for right hand actions")
+        else:
+            modified_meta.stats = deepcopy(dataset.meta.stats)
+            if "action" in modified_meta.stats:
+                modified_meta.stats = filter_dataset_stats_for_right_hand(modified_meta.stats)
+                logging.info("Filtered existing stats for right hand actions")
+    else:
+        modified_meta = dataset.meta
+
     policy = make_policy(
         cfg=cfg.policy,
-        ds_meta=dataset.meta,
+        ds_meta=modified_meta,
     )
 
     logging.info("Creating optimizer and scheduler")
@@ -176,6 +280,7 @@ def train(cfg: TrainPipelineConfig):
     logging.info(f"{dataset.num_episodes=}")
     logging.info(f"{num_learnable_params=} ({format_big_number(num_learnable_params)})")
     logging.info(f"{num_total_params=} ({format_big_number(num_total_params)})")
+    logging.info(f"Training right hand only with {len(RIGHT_HAND_ACTION_INDICES)} degrees of freedom")
 
     # create dataloader for offline training
     if hasattr(cfg.policy, "drop_n_last_frames"):
@@ -219,6 +324,9 @@ def train(cfg: TrainPipelineConfig):
         start_time = time.perf_counter()
         batch = next(dl_iter)
         train_tracker.dataloading_s = time.perf_counter() - start_time
+
+        # 过滤批次数据，只保留右手的14个自由度动作
+        batch = filter_right_hand_actions(batch)
 
         for key in batch:
             if isinstance(batch[key], torch.Tensor):
