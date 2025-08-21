@@ -92,6 +92,7 @@ class VQBeTConfig(PreTrainedConfig):
     """
 
     # Inputs / output structure.
+    type: str = "vqbet"
     n_obs_steps: int = 5
     n_action_pred_token: int = 3
     action_chunk_size: int = 5

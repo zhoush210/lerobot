@@ -133,6 +133,12 @@ class ACTPolicy(PreTrainedPolicy):
         # querying the policy.
         if len(self._action_queue) == 0:
             actions = self.model(batch)[0][:, : self.config.n_action_steps]
+            # zshtodo
+            # # Unpack model output for clarity
+            # # print("batch:", batch['observation.state'])
+            # actions_full, (mu, log_sigma_x2) = self.model(batch)
+            # # print("actions_full shape:", actions_full.shape)
+            # actions = actions_full[:, : self.config.n_action_steps]
 
             # TODO(rcadene): make _forward return output dictionary?
             actions = self.unnormalize_outputs({"action": actions})["action"]

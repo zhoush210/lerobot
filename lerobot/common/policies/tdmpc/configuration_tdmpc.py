@@ -107,6 +107,7 @@ class TDMPCConfig(PreTrainedConfig):
     """
 
     # Input / output structure.
+    type: str = "tdmpc"
     n_obs_steps: int = 1
     n_action_repeats: int = 2
     horizon: int = 5
